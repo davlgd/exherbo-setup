@@ -2,6 +2,7 @@
 
 STAGE_FILE="exherbo-x86_64-pc-linux-gnu-gcc-current.tar.xz"
 STAGE_URL="https://stages.exherbolinux.org/x86_64-pc-linux-gnu"
+SCRIPT_DIR=$PWD
 DISK="/dev/sda"
 
 # Script to init the disk, download and extract the stage3 tarball, starts configuring the system
@@ -58,7 +59,7 @@ echo 'nameserver 1.1.1.1
 nameserver 9.9.9.9' > /mnt/exherbo/etc/resolv.conf
 
 # Let's chroot!
-cp ~/chrooted.sh /mnt/exherbo
+cp ${SCRIPT_DIR}/chrooted.sh /mnt/exherbo
 env -i TERM=$TERM SHELL=/bin/bash HOME=$HOME $(which chroot) /mnt/exherbo /bin/bash chrooted.sh
 
 # It's the end my friend

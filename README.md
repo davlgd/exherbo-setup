@@ -13,7 +13,7 @@ The project is composed of two main scripts:
 
 - A virtual machine or an environment where you can execute bash scripts.
 - An internet connection to download the necessary files.
-- A Live Linux image with a SSH acces, for example [System Rescue](https://www.system-rescue.org/Download/) :
+- A Live Linux image with a SSH acces, for example [System Rescue](https://www.system-rescue.org/Download/):
   - Start on the ISO with EFI (Secure boot disabled)
   - Select a `Boot System Rescue` entry
   - Edit (`e`) to add the `nofirewall` (QWERTY keyboard) directive at the end of the `Linux` line

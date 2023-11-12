@@ -2,9 +2,10 @@
 
 # Script to setup Exherbo once chrooted in the configured stage3
 
-KEYMAP=fr
+USER="davlgd"
+KEYMAP="fr"
 GRUB_TIMEOUT=0
-LANG=fr_FR.UTF-8
+LANG="fr_FR.UTF-8"
 CPU_CORES=$(nproc)
 HOSTNAME="exherbovm"
 LINUX_VERSION="6.6.1"
@@ -28,8 +29,31 @@ echo $HOSTNAME > /etc/hostname
 echo "127.0.0.1 $HOSTNAME.local $HOSTNAME localhost" > /etc/hosts
 echo "::1 $HOSTNAME.local $HOSTNAME localhost" >> /etc/hosts
 
-# Set the root password
-passwd
+# Defines a new sudo user and set its password 
+useradd -m -G wheel -s /bin/bash ${USER}
+echo "${USER} ALL=(ALL) ALL" > /etc/sudoers.d/${USER}
+chmod 440 /etc/sudoers.d/${USER}
+echo
+echo "Account created for ${USER}, please define its password:"
+passwd ${USER}
+
+# Set the login message
+echo '
+
+
+███████╗██╗  ██╗██╗  ██╗███████╗██████╗ ██████╗  ██████╗ 
+██╔════╝╚██╗██╔╝██║  ██║██╔════╝██╔══██╗██╔══██╗██╔═══██╗
+█████╗   ╚███╔╝ ███████║█████╗  ██████╔╝██████╔╝██║   ██║
+██╔══╝   ██╔██╗ ██╔══██║██╔══╝  ██╔══██╗██╔══██╗██║   ██║
+███████╗██╔╝ ██╗██║  ██║███████╗██║  ██║██████╔╝╚██████╔╝
+╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═════╝  ╚═════╝ 
+                                                         
+
+\S{ANSI_COLOR}\S{PRETTY_NAME}\e[0m - \n.\O, \s \r, \m
+Logged Users: \U
+\d, \t
+
+' > /etc/issue
 
 # Set the paludis options
 sed -i "s/jobs=2/jobs=$CPU_CORES/g" $PALUDIS_CONF
@@ -50,6 +74,7 @@ rm linux-${LINUX_VERSION}.tar.xz
 cd linux-${LINUX_VERSION}
 
 make defconfig
+sed -i 's/^CONFIG_DEBUG_STACK_USAGE=y/CONFIG_DEBUG_STACK_USAGE=n/' ".config"
 make -j$(nproc) && make modules_install && make install
 
 # Configue GRUB with the desired timeout
