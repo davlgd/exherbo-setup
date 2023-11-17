@@ -23,6 +23,7 @@ echo "Description:"
 echo "  Exherbo Setup is a simple script to automate the installation of Exherbo Linux."
 echo "  It can be run with a specific target device or without any arguments,"
 echo "  in which case it will use /dev/sda as the default installation target."
+echo "  The script will automaticaly detect if you're using a BIOS or EFI based system"
 echo ""
 echo "  WARNING: This script will format the target device and install Exherbo Linux."
 echo "           Make sure to back up any important data on the device before proceeding."
@@ -34,19 +35,45 @@ elif [ $# -eq 1 ] && [ -b "$1" ]; then
     DISK=$1
 fi
 
-get_disk_partitions() {
-    if [[ ${DISK} == /dev/sd* ]]; then
-        PART_EFI=${DISK}1
-        PART_BOOT=${DISK}2
-        PART_ROOT=${DISK}3
-    elif [[ ${DISK} == /dev/nvme* ]]; then
-        PART_EFI=${DISK}p1
-        PART_BOOT=${DISK}p2
-        PART_ROOT=${DISK}p3
+bios_or_uefi() {
+    if [ -d /sys/firmware/efi ]; then
+        SYSTEM_TYPE="UEFI"
+        echo "UEFI system detected"
     else
-        echo "Storage device not recognized"
-        exit 1
+        SYSTEM_TYPE="BIOS"
+        echo "BIOS system detected"
     fi
+}
+
+get_disk_partitions() {
+    case $SYSTEM_TYPE in
+    "UEFI")
+        if [[ ${DISK} == /dev/sd* ]]; then
+            PART_EFI=${DISK}1
+            PART_BOOT=${DISK}2
+            PART_ROOT=${DISK}3
+        elif [[ ${DISK} == /dev/nvme* ]]; then
+            PART_EFI=${DISK}p1
+            PART_BOOT=${DISK}p2
+            PART_ROOT=${DISK}p3
+        else
+            echo "Storage device not recognized"
+            exit 1
+        fi
+        ;;
+    "BIOS")
+        if [[ ${DISK} == /dev/sd* ]]; then
+            PART_BIOS=${DISK}1
+            PART_ROOT=${DISK}2
+        elif [[ ${DISK} == /dev/nvme* ]]; then
+            PART_BIOS=${DISK}p1
+            PART_ROOT=${DISK}p2
+        else
+            echo "Storage device not recognized"
+            exit 1
+        fi
+        ;;
+    esac
 }
 
 wipe_disk() {
@@ -62,13 +89,22 @@ wipe_disk() {
 
 create_partitions() {
     # Create the filesystems
-    # - FAT32 for the Boot &EFI partition
+    # - FAT32 for the Boot & EFI partition
     # - ext4 for the root partition
     # - Label the partitions
-    mkfs.fat -F 32 ${PART_EFI} -n EFI
-    fatlabel ${PART_EFI} EFI
-    mkfs.fat -F 32 ${PART_BOOT} -n BOOT
-    e2label ${PART_BOOT} BOOT
+    case $SYSTEM_TYPE in
+        "UEFI")
+            mkfs.fat -F 32 ${PART_EFI} -n EFI
+            fatlabel ${PART_EFI} EFI
+            mkfs.fat -F 32 ${PART_BOOT} -n BOOT
+            e2label ${PART_BOOT} BOOT
+            ;;
+        "BIOS")
+            mkfs.ext2 ${PART_BIOS} -L BIOS
+            e2label ${PART_BIOS} BIOS
+            ;;
+    esac
+
     mkfs.ext4 ${PART_ROOT} -L EXHERBO
     e2label ${PART_ROOT} EXHERBO
 }
@@ -93,37 +129,68 @@ mount_stage() {
 }
 
 prepare_chroot() {
-    echo '
-    # <fs>                      <mountpoint>    <type> <opts>   <dump/pass>
-    /dev/disk/by-label/EFI      /efi            vfat   defaults 0 0
-    /dev/disk/by-label/BOOT     /boot           vfat   defaults 0 0
-    /dev/disk/by-label/EXHERBO  /               ext4   defaults 0 0' > /mnt/exherbo/etc/fstab
+    # Define the partition to be mounted at boot
+    case $SYSTEM_TYPE in
+        "UEFI")
+            cat <<EOF > /mnt/exherbo/etc/fstab
+            # <fs>          <mountpoint>    <type> <opts>   <dump/pass>
+            ${PART_ROOT}    /               ext4   defaults 0 0
+            ${PART_BOOT}    /boot           vfat   defaults 0 0
+            ${PART_EFI}     /efi            vfat   defaults 0 0
+            EOF
+            ;;
+        "BIOS")
+            cat <<EOF > /mnt/exherbo/etc/fstab
+            # <fs>          <mountpoint>    <type> <opts>   <dump/pass>
+            ${PART_ROOT}    /               ext4   defaults 0 0
+            ${PART_BOOT}    /boot           ext2   defaults 0 0
+            EOF
+            ;;
+    esac
 
     mount -o rbind /dev /mnt/exherbo/dev
     mount -o bind /sys /mnt/exherbo/sys
     mount -t proc none /mnt/exherbo/proc
-    mount -o x-mount.mkdir /dev/sda1 /mnt/exherbo/efi
-    mount /dev/sda2 /mnt/exherbo/boot
+    mount ${PART_BOOT} /mnt/exherbo/boot
+
+    if [ $SYSTEM_TYPE == "UEFI" ]; then
+        mount -o x-mount.mkdir ${PART_EFI} /mnt/exherbo/efi
+    fi
 }
 
 echo "Exherbo Linux will be installed on ${DISK}"
 echo
-echo "You need to create at least 3 partitions:" 
+echo "You need to create at least 2 partitions:" 
 echo " - /     : Linux Filesystem"
 echo " - /boot : Linux Extended Boot"
-echo " - /efi  : EFI System"
+echo " - /efi  : EFI System (only for UEFI)"
 echo
 
 wipe_disk > /dev/null
-echo
-echo -n "cfdsik will be launched to allow partition creation..." 
-echo && read -n 1 -s -r -p "Press any key to continue..."
 
-echo "label: gpt"   | sfdisk -W always ${DISK} > /dev/null 2>&1
-echo ", 512M, U"    | sfdisk -W always -a ${DISK} > /dev/null 2>&1
-echo ", 512M, L"    | sfdisk -W always -a ${DISK} > /dev/null 2>&1
-echo ","            | sfdisk -W always -a ${DISK} > /dev/null 2>&1
-cfdisk ${DISK} 
+bios_or_uefi
+
+case $SYSTEM_TYPE in
+"UEFI")
+    echo
+    echo -n "cfdsik will be launched to allow partition creation..." 
+    echo && read -n 1 -s -r -p "Press any key to continue..."
+
+    echo "label: gpt"   | sfdisk -W always ${DISK} > /dev/null 2>&1
+    echo ", 512M, U"    | sfdisk -W always -a ${DISK} > /dev/null 2>&1
+    echo ", 512M, L"    | sfdisk -W always -a ${DISK} > /dev/null 2>&1
+    echo ","            | sfdisk -W always -a ${DISK} > /dev/null 2>&1
+    cfdisk ${DISK} 
+    ;;
+"BIOS")
+    echo "BIOS system detected"
+    echo
+    echo "You need to create at least 2 partitions:" 
+    echo " - /     : Linux Filesystem"
+    echo " - /boot : Linux Extended Boot"
+    ;;
+esac
+
 get_disk_partitions
 
 clear
