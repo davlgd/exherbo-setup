@@ -25,16 +25,24 @@ ask_config() {
     read -p $'Enter the hostname (default: exherbovm): ' HOSTNAME_INPUT
     HOSTNAME=${HOSTNAME_INPUT:-exherbovm}
 
-    read -p $'Enter your country code (e.g. fr for France): ' COUNTRY_CODE
+    read -p 'Enter your country code (e.g., fr for France): ' COUNTRY_CODE
 
-    if [[ "$COUNTRY_CODE" =~ ^[a-zA-Z]{2}$ ]]; then
-        LANG="${COUNTRY_CODE,,}_$(echo "${COUNTRY_CODE,,}" | tr 'a-z' 'A-Z').UTF-8"
-        KEYMAP="${COUNTRY_CODE,,}"
-    else
-        LANG="en_US.UTF-8"
-        KEYMAP="us"
-        echo "Using en_US.UTF-8 and us keymap by default."
-    fi
+    case $COUNTRY_CODE in
+        "fr-bepo")
+            LANG="fr_FR.UTF-8"
+            KEYMAP="fr-bepo"
+            ;;
+        [a-zA-Z][a-zA-Z])
+            country_lower=${COUNTRY_CODE,,}
+            LANG="${country_lower}_${country_lower^^}.UTF-8"
+            KEYMAP="$country_lower"
+            ;;
+        *)
+            LANG="en_US.UTF-8"
+            KEYMAP="us"
+            echo "Using en_US.UTF-8 and us keymap by default."
+            ;;
+    esac
 
     read -p $'Enter the username (default: davlgd): ' USER_INPUT
     USER=${USER_INPUT:-davlgd}
