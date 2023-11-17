@@ -137,26 +137,30 @@ prepare_chroot() {
             ${PART_ROOT}    /               ext4   defaults 0 0
             ${PART_BOOT}    /boot           vfat   defaults 0 0
             ${PART_EFI}     /efi            vfat   defaults 0 0
-            EOF
+EOF
             ;;
         "BIOS")
             cat <<EOF > /mnt/exherbo/etc/fstab
             # <fs>          <mountpoint>    <type> <opts>   <dump/pass>
             ${PART_ROOT}    /               ext4   defaults 0 0
             ${PART_BOOT}    /boot           ext2   defaults 0 0
-            EOF
+EOF
             ;;
     esac
 
     mount -o rbind /dev /mnt/exherbo/dev
     mount -o bind /sys /mnt/exherbo/sys
     mount -t proc none /mnt/exherbo/proc
+
+    mkdir -p /mnt/exherbo/boot
     mount ${PART_BOOT} /mnt/exherbo/boot
 
     if [ $SYSTEM_TYPE == "UEFI" ]; then
         mount -o x-mount.mkdir ${PART_EFI} /mnt/exherbo/efi
     fi
 }
+
+bios_or_uefi
 
 echo "Exherbo Linux will be installed on ${DISK}"
 echo
@@ -167,8 +171,6 @@ echo " - /efi  : EFI System (only for UEFI)"
 echo
 
 wipe_disk > /dev/null
-
-bios_or_uefi
 
 case $SYSTEM_TYPE in
 "UEFI")
@@ -183,11 +185,8 @@ case $SYSTEM_TYPE in
     cfdisk ${DISK} 
     ;;
 "BIOS")
-    echo "BIOS system detected"
-    echo
-    echo "You need to create at least 2 partitions:" 
-    echo " - /     : Linux Filesystem"
-    echo " - /boot : Linux Extended Boot"
+    echo ", 512M, U"    | sfdisk -W always ${DISK} > /dev/null 2>&1
+    echo ","            | sfdisk -W always -a ${DISK} > /dev/null 2>&1
     ;;
 esac
 
@@ -195,15 +194,13 @@ get_disk_partitions
 
 clear
 echo '
-
     ███████╗██╗  ██╗██╗  ██╗███████╗██████╗ ██████╗  ██████╗ 
     ██╔════╝╚██╗██╔╝██║  ██║██╔════╝██╔══██╗██╔══██╗██╔═══██╗
     █████╗   ╚███╔╝ ███████║█████╗  ██████╔╝██████╔╝██║   ██║
     ██╔══╝   ██╔██╗ ██╔══██║██╔══╝  ██╔══██╗██╔══██╗██║   ██║
     ███████╗██╔╝ ██╗██║  ██║███████╗██║  ██║██████╔╝╚██████╔╝
-    ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═════╝  ╚═════╝ 
-                                                            
-'
+    ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═════╝  ╚═════╝
+    '
 
 echo -n "Partitions creation..."
 create_partitions > /dev/null  2>&1
@@ -223,7 +220,7 @@ echo
 
 # Let's chroot!
 cp ${SCRIPT_DIR}/chrooted.sh /mnt/exherbo
-env -i TERM=$TERM SHELL=/bin/bash HOME=$HOME $(which chroot) /mnt/exherbo /bin/bash chrooted.sh
+env -i TERM=$TERM SHELL=/bin/bash HOME=$HOME $(which chroot) /mnt/exherbo /bin/bash chrooted.sh ${SYSTEM_TYPE} ${DISK}
 
 # It's the end my friend
 rm /mnt/exherbo/chrooted.sh
