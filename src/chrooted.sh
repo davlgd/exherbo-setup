@@ -5,6 +5,8 @@
 CPU_CORES=$(nproc)
 PALUDIS_CONF="/etc/paludis/options.conf"
 KERNEL_BASE_URL="https://cdn.kernel.org/pub/linux/kernel/v"
+SYSTEM_TYPE=$1
+DISK=$2
 
 # Configure the DNS resolvers
 echo 'nameserver 1.1.1.1
@@ -15,12 +17,16 @@ ask_config() {
     KERNEL_VERSION=${KERNEL_VERSION_INPUT:-6.6.1}
     get_kernel_url
 
-    read -p $'What boot loader do you want to use?\n(g) grub\n(s) systemd-boot\nEnter your choice: ' bootloader_choice
-    case "$bootloader_choice" in
-        g) LOADER="grub" ;;
-        s) LOADER="systemd-boot" ;;
-        *) LOADER="systemd-boot" ;;
-    esac
+    if [ $SYSTEM_TYPE == "UEFI" ]; then
+        read -p $'What boot loader do you want to use?\n(g) grub\n(s) systemd-boot\nEnter your choice: ' bootloader_choice
+        case "$bootloader_choice" in
+            g) LOADER="grub" ;;
+            s) LOADER="systemd-boot" ;;
+            *) LOADER="systemd-boot" ;;
+        esac
+    else 
+        LOADER="grub"
+    fi
 
     read -p $'Enter the hostname (default: exherbovm): ' HOSTNAME_INPUT
     HOSTNAME=${HOSTNAME_INPUT:-exherbovm}
@@ -77,8 +83,6 @@ configure_os() {
 
     # Set the login message
     echo '
-
-
     ███████╗██╗  ██╗██╗  ██╗███████╗██████╗ ██████╗  ██████╗ 
     ██╔════╝╚██╗██╔╝██║  ██║██╔════╝██╔══██╗██╔══██╗██╔═══██╗
     █████╗   ╚███╔╝ ███████║█████╗  ██████╔╝██████╔╝██║   ██║
@@ -90,7 +94,6 @@ configure_os() {
     \S{ANSI_COLOR}\S{PRETTY_NAME}\e[0m - \n.\O, \s \r, \m
     Logged Users: \U
     \d, \t
-
     ' > /etc/issue
 }
 
@@ -100,12 +103,16 @@ configure_packages_manager() {
     cave sync
     cave resolve -x --skip-phase test repository/marv
     cave resolve -x --skip-phase test repository/hardware
-    cave resolve -x --skip-phase efibootmgr linux-firmware nano neofetch
+    cave resolve -x --skip-phase linux-firmware nano neofetch
 }
 
 setup_bootloader() {
-    mount -t efivarfs efivarfs /sys/firmware/efi/efivars
-
+    if [ $SYSTEM_TYPE == "UEFI" ]; then
+        echo "sys-boot/efibootmgr" >> $PALUDIS_CONF
+        cave resolve -x --skip-phase test sys-boot/efibootmgr
+        mount -t efivarfs efivarfs /sys/firmware/efi/efivars
+    fi
+   
     if [ $LOADER == "systemd-boot" ]; then
         echo "sys-apps/systemd cryptsetup efi" >> /etc/paludis/options.conf
         echo "sys-apps/coreutils xattr " >> /etc/paludis/options.conf
@@ -122,11 +129,15 @@ setup_bootloader() {
         eclectic installkernel set -2
     else
         GRUB_TIMEOUT=0
-        echo 'sys-boot/grub efi' >> $PALUDIS_CONF
-        cave resolve 'sys-boot/grub::arbor' -zx1 --skip-phase test
 
-        echo "set timeout=${GRUB_TIMEOUT}" >> /etc/grub.d/40_custom
-        grub-install --target=x86_64-efi --efi-directory=/efi --bootloader-id=exherbo
+        if [ $SYSTEM_TYPE == "UEFI" ]; then
+            echo 'sys-boot/grub efi' >> $PALUDIS_CONF
+            cave resolve 'sys-boot/grub::arbor' -zx1 --skip-phase test
+
+            echo "set timeout=${GRUB_TIMEOUT}" >> /etc/grub.d/40_custom
+            grub-install --target=x86_64-efi --efi-directory=/efi --bootloader-id=exherbo
+        fi
+        
     fi
 }
 
@@ -160,12 +171,12 @@ get_kernel() {
 }
 
 compile_kernel() {
-    make defconfig
-    sed -i 's/^CONFIG_DEBUG_STACK_USAGE=y/CONFIG_DEBUG_STACK_USAGE=n/' ".config"
-    echo "CONFIG_FB_EFI=y" >> ".config"
-    echo "CONFIG_FRAMEBUFFER_CONSOLE=y" >> ".config"
+    
+    make olddefconfig
+
     make -j$(nproc) && make modules_install && make install
     if [ $LOADER == "grub" ]; then
+        grub-install ${DISK}
         grub-mkconfig -o /boot/grub/grub.cfg
     fi
 }
@@ -180,24 +191,28 @@ ask_config
 configure_os
 
 echo
-echo -n "Configuring the package manager and some tools, it will take a while..."
+echo -n "Configuring the package manager and compiling some tools, it will take a while..."
 configure_packages_manager > /dev/null 2>&1
 echo -ne "\r\033[K"
-echo -e " - Configuring the package manager and some tools: \e[92m\u2713\e[0m" 
+echo -e " - Configuring the package manager and compiling some tools: \e[92m\u2713\e[0m" 
 
-echo -n "Setting up the bootloader..."
+echo -n "Compiling and setting up the bootloader..."
 setup_bootloader > /dev/null 2>&1
 get_kernel > /dev/null 2>&1
 echo -ne "\r\033[K"
-echo -e " - Setting up the bootloader: \e[92m\u2713\e[0m" 
+echo -e " - Compiling and setting up the bootloader: \e[92m\u2713\e[0m" 
 
 echo -n "Compiling the kernel..."
-compile_kernel > /dev/null 2>&1
+compile_kernel
 echo -ne "\r\033[K"
 echo -e " - Compiling the kernel: \e[92m\u2713\e[0m" 
 
 echo
 echo "Enabling services:"
 enable_services
+
+echo
+echo "Rebooting in 5 secondes..."
+sleep 5
 
 exit
