@@ -23,7 +23,12 @@ The project is composed of two main scripts:
   - Show network configuration of the VM (`ip a`)
   - Connect from another machine if needed
 
-  If you prefer to setup exherbo from the VM, you don't need the `nofirewall` directive or to add a root password.
+If you prefer to setup exherbo from the VM, you don't need the `nofirewall` directive or to add a root password.
+
+If you need Wi-Fi, you can use `nmcli`:
+```bash
+nmcli --ask dev wifi connect <SSID>
+```
 
 ## Usage
 
