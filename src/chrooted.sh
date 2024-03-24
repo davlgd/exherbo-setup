@@ -13,8 +13,8 @@ echo 'nameserver 1.1.1.1
 nameserver 9.9.9.9' > /etc/resolv.conf
 
 ask_config() {    
-    read -p $'Enter the GNU/Linux kernel version (default: 6.6.1): ' KERNEL_VERSION_INPUT
-    KERNEL_VERSION=${KERNEL_VERSION_INPUT:-6.6.1}
+    read -p $'Enter the GNU/Linux kernel version (default: 6.6.22): ' KERNEL_VERSION_INPUT
+    KERNEL_VERSION=${KERNEL_VERSION_INPUT:-6.6.22}
     get_kernel_url
 
     if [ $SYSTEM_TYPE == "UEFI" ]; then
@@ -28,8 +28,8 @@ ask_config() {
         LOADER="grub"
     fi
 
-    read -p $'Enter the hostname (default: exherbovm): ' HOSTNAME_INPUT
-    HOSTNAME=${HOSTNAME_INPUT:-exherbovm}
+    read -p $'Enter the hostname (default: exherbo): ' HOSTNAME_INPUT
+    HOSTNAME=${HOSTNAME_INPUT:-exherbo}
 
     read -p 'Enter your country code (e.g., fr for France): ' COUNTRY_CODE
 
@@ -101,8 +101,8 @@ configure_packages_manager() {
     sed -i "s/jobs=2/jobs=$CPU_CORES/g" $PALUDIS_CONF
 
     cave sync
-    cave resolve -x --skip-phase test repository/marv
-    cave resolve -x --skip-phase test repository/hardware
+    cave resolve -x repository/marv
+    cave resolve -x repository/hardware
     cave resolve -x --skip-phase linux-firmware nano neofetch
 }
 
@@ -144,7 +144,7 @@ setup_bootloader() {
 get_kernel_url(){
     if [[ "$KERNEL_VERSION" =~ ^[0-5]\..* ]]; then
         echo "Kernel version ${KERNEL_VERSION} is too old. Using default value."
-        KERNEL_VERSION=6.6.1
+        KERNEL_VERSION=6.6.22
     fi
 
     KERNEL_MAJOR_VERSION=${KERNEL_VERSION:0:1}
@@ -154,7 +154,7 @@ get_kernel_url(){
         echo "Kernel version ${KERNEL_VERSION} found."
     else
         echo "Kernel version ${KERNEL_VERSION} not found. Using default value."
-        KERNEL_VERSION=6.6.1
+        KERNEL_VERSION=6.6.22
         KERNEL_MAJOR_VERSION=${KERNEL_VERSION:0:1}
         KERNEL_URL="${KERNEL_BASE_URL}${KERNEL_MAJOR_VERSION}.x/linux-${KERNEL_VERSION}.tar.xz"
     fi
@@ -172,7 +172,7 @@ get_kernel() {
 
 compile_kernel() {
     
-    make olddefconfig
+    make defconfig
 
     make -j$(nproc) && make modules_install && make install
     if [ $LOADER == "grub" ]; then
