@@ -12,9 +12,9 @@ DISK=$2
 echo 'nameserver 1.1.1.1
 nameserver 9.9.9.9' > /etc/resolv.conf
 
-ask_config() {    
-    read -p $'Enter the GNU/Linux kernel version (default: 6.6.22): ' KERNEL_VERSION_INPUT
-    KERNEL_VERSION=${KERNEL_VERSION_INPUT:-6.6.22}
+ask_config() {
+    read -rp $'Enter the GNU/Linux kernel version (default: 6.6.30): ' KERNEL_VERSION_INPUT
+    KERNEL_VERSION=${KERNEL_VERSION_INPUT:-6.6.30}
     get_kernel_url
 
     if [ $SYSTEM_TYPE == "UEFI" ]; then
@@ -24,7 +24,7 @@ ask_config() {
             s) LOADER="systemd-boot" ;;
             *) LOADER="systemd-boot" ;;
         esac
-    else 
+    else
         LOADER="grub"
     fi
 
@@ -73,7 +73,7 @@ configure_os() {
     echo "127.0.0.1 $HOSTNAME.local $HOSTNAME localhost" > /etc/hosts
     echo "::1 $HOSTNAME.local $HOSTNAME localhost" >> /etc/hosts
 
-    # Defines a new sudo user and set its password 
+    # Defines a new sudo user and set its password
     useradd -m -G wheel -s /bin/bash ${USER} > /dev/null 2>&1
     echo "${USER} ALL=(ALL) ALL" > /etc/sudoers.d/${USER}
     chmod 440 /etc/sudoers.d/${USER}
@@ -83,13 +83,13 @@ configure_os() {
 
     # Set the login message
     echo '
-    ███████╗██╗  ██╗██╗  ██╗███████╗██████╗ ██████╗  ██████╗ 
+    ███████╗██╗  ██╗██╗  ██╗███████╗██████╗ ██████╗  ██████╗
     ██╔════╝╚██╗██╔╝██║  ██║██╔════╝██╔══██╗██╔══██╗██╔═══██╗
     █████╗   ╚███╔╝ ███████║█████╗  ██████╔╝██████╔╝██║   ██║
     ██╔══╝   ██╔██╗ ██╔══██║██╔══╝  ██╔══██╗██╔══██╗██║   ██║
     ███████╗██╔╝ ██╗██║  ██║███████╗██║  ██║██████╔╝╚██████╔╝
-    ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═════╝  ╚═════╝ 
-                                                            
+    ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═════╝  ╚═════╝
+
 
     \S{ANSI_COLOR}\S{PRETTY_NAME}\e[0m - \n.\O, \s \r, \m
     Logged Users: \U
@@ -112,11 +112,11 @@ setup_bootloader() {
         cave resolve -x --skip-phase test sys-boot/efibootmgr
         mount -t efivarfs efivarfs /sys/firmware/efi/efivars
     fi
-   
+
     if [ $LOADER == "systemd-boot" ]; then
         echo "sys-apps/systemd cryptsetup efi" >> /etc/paludis/options.conf
         echo "sys-apps/coreutils xattr " >> /etc/paludis/options.conf
-        cave resolve -x --skip-phase test sys-apps/systemd 
+        cave resolve -x --skip-phase test sys-apps/systemd
         cave resolve -x --skip-phase test dracut
 
         echo "compress=\"xz\"" > /etc/dracut.conf.d/compress.conf
@@ -124,7 +124,7 @@ setup_bootloader() {
         echo "hostonly=\"yes\"" > /etc/dracut.conf.d/hostonly.conf
         echo "hostonly_mode=\"strict\"" >> /etc/dracut.conf.d/hostonly.conf
         echo "dracutmodules=\"base bash dracut-systemd fs-lib i18n kernel-modules rootfs-block systemd systemd-initrd terminfo udev-rules usrmount\"" > /etc/dracut.conf.d/modules.conf
-        
+
         bootctl --make-machine-id-directory=yes --esp-path=/efi --boot-path=/boot install
         eclectic installkernel set -2
     else
@@ -137,14 +137,14 @@ setup_bootloader() {
             echo "set timeout=${GRUB_TIMEOUT}" >> /etc/grub.d/40_custom
             grub-install --target=x86_64-efi --efi-directory=/efi --bootloader-id=exherbo
         fi
-        
+
     fi
 }
 
 get_kernel_url(){
     if [[ "$KERNEL_VERSION" =~ ^[0-5]\..* ]]; then
         echo "Kernel version ${KERNEL_VERSION} is too old. Using default value."
-        KERNEL_VERSION=6.6.22
+        KERNEL_VERSION=6.6.30
     fi
 
     KERNEL_MAJOR_VERSION=${KERNEL_VERSION:0:1}
@@ -154,7 +154,7 @@ get_kernel_url(){
         echo "Kernel version ${KERNEL_VERSION} found."
     else
         echo "Kernel version ${KERNEL_VERSION} not found. Using default value."
-        KERNEL_VERSION=6.6.22
+        KERNEL_VERSION=6.6.30
         KERNEL_MAJOR_VERSION=${KERNEL_VERSION:0:1}
         KERNEL_URL="${KERNEL_BASE_URL}${KERNEL_MAJOR_VERSION}.x/linux-${KERNEL_VERSION}.tar.xz"
     fi
@@ -171,8 +171,10 @@ get_kernel() {
 }
 
 compile_kernel() {
-    
+
     make defconfig
+    scripts/config --enable CONFIG_FB_SIMPLE
+    scripts/config --enable CONFIG_X86_SYSFB
 
     make -j$(nproc) && make modules_install && make install
     if [ $LOADER == "grub" ]; then
@@ -194,18 +196,18 @@ echo
 echo -n "Configuring the package manager and compiling some tools, it will take a while..."
 configure_packages_manager > /dev/null 2>&1
 echo -ne "\r\033[K"
-echo -e " - Configuring the package manager and compiling some tools: \e[92m\u2713\e[0m" 
+echo -e " - Configuring the package manager and compiling some tools: \e[92m\u2713\e[0m"
 
 echo -n "Compiling and setting up the bootloader..."
 setup_bootloader > /dev/null 2>&1
 get_kernel > /dev/null 2>&1
 echo -ne "\r\033[K"
-echo -e " - Compiling and setting up the bootloader: \e[92m\u2713\e[0m" 
+echo -e " - Compiling and setting up the bootloader: \e[92m\u2713\e[0m"
 
 echo -n "Compiling the kernel..."
 compile_kernel
 echo -ne "\r\033[K"
-echo -e " - Compiling the kernel: \e[92m\u2713\e[0m" 
+echo -e " - Compiling the kernel: \e[92m\u2713\e[0m"
 
 echo
 echo "Enabling services:"
