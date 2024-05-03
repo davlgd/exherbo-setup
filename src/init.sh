@@ -18,6 +18,8 @@ echo ""
 echo "Options:"
 echo "  <device>    - The target device for Exherbo Linux installation."
 echo "                Example: ./init.sh /dev/nvme0n1"
+echo "                         or"
+echo "                         ./init.sh /dev/vda"
 echo ""
 echo "Description:"
 echo "  Exherbo Setup is a simple script to automate the installation of Exherbo Linux."
@@ -31,7 +33,7 @@ echo ""
 echo "For more information on Exherbo Linux installation, visit:"
 echo "https://github.com/davlgd/exherbo-setup"
 exit
-elif [ $# -eq 1 ] && [ -b "$1" ]; then
+elif [ $# -eq 1 ]; then
     DISK=$1
 fi
 
@@ -48,7 +50,7 @@ bios_or_uefi() {
 get_disk_partitions() {
     case $SYSTEM_TYPE in
     "UEFI")
-        if [[ ${DISK} == /dev/sd* ]]; then
+        if [[ ${DISK} == /dev/sd* ]] || [[ ${DISK} == /dev/vd* ]]; then
             PART_EFI=${DISK}1
             PART_BOOT=${DISK}2
             PART_ROOT=${DISK}3
@@ -62,7 +64,7 @@ get_disk_partitions() {
         fi
         ;;
     "BIOS")
-        if [[ ${DISK} == /dev/sd* ]]; then
+        if [[ ${DISK} == /dev/sd* ]] || [[ ${DISK} == /dev/vd* ]]; then
             PART_BIOS=${DISK}1
             PART_ROOT=${DISK}2
         elif [[ ${DISK} == /dev/nvme* ]]; then
