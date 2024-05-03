@@ -35,6 +35,11 @@ elif [ $# -eq 1 ] && [ -b "$1" ]; then
     DISK=$1
 fi
 
+if [ ! -b "${DISK}" ]; then
+    echo "Invalid device: ${DISK}"
+    exit 1
+fi
+
 bios_or_uefi() {
     if [ -d /sys/firmware/efi ]; then
         SYSTEM_TYPE="UEFI"
@@ -45,46 +50,46 @@ bios_or_uefi() {
     fi
 }
 
+wipe_disk() {
+    read -rp $"You're about to wipe ${DISK}. Do you want to continue? [y/n] "
+    if [[ ! "${REPLY}" =~ ^[Yy]$ ]]
+    then
+        echo
+        exit 1
+    fi
+
+    wipefs -a "${DISK}"
+}
+
 get_disk_partitions() {
-    case $SYSTEM_TYPE in
+    case ${SYSTEM_TYPE} in
     "UEFI")
-        if [[ ${DISK} == /dev/sd* ]]; then
-            PART_EFI=${DISK}1
-            PART_BOOT=${DISK}2
-            PART_ROOT=${DISK}3
-        elif [[ ${DISK} == /dev/nvme* ]]; then
-            PART_EFI=${DISK}p1
-            PART_BOOT=${DISK}p2
-            PART_ROOT=${DISK}p3
+        if [[ "${DISK}" == /dev/sd* ]]; then
+            PART_EFI="${DISK}1"
+            PART_BOOT="${DISK}2"
+            PART_ROOT="${DISK}3"
+        elif [[ "${DISK}" == /dev/nvme* ]]; then
+            PART_EFI="${DISK}p1"
+            PART_BOOT="${DISK}p2"
+            PART_ROOT="${DISK}p3"
         else
             echo "Storage device not recognized"
             exit 1
         fi
         ;;
     "BIOS")
-        if [[ ${DISK} == /dev/sd* ]]; then
-            PART_BIOS=${DISK}1
-            PART_ROOT=${DISK}2
-        elif [[ ${DISK} == /dev/nvme* ]]; then
-            PART_BIOS=${DISK}p1
-            PART_ROOT=${DISK}p2
+        if [[ "${DISK}" == /dev/sd* ]]; then
+            PART_BOOT="${DISK}1"
+            PART_ROOT="${DISK}2"
+        elif [[ "${DISK}" == /dev/nvme* ]]; then
+            PART_BOOT="${DISK}p1"
+            PART_ROOT="${DISK}p2"
         else
             echo "Storage device not recognized"
             exit 1
         fi
         ;;
     esac
-}
-
-wipe_disk() {
-    read -p $"You're about to wipe ${DISK}. Do you want to continue? [y/N] " -n 1 -r
-    if [[ ! $REPLY =~ ^[Yy]$ ]]
-    then
-        echo
-        exit 1
-    fi
-
-    wipefs -a ${DISK}
 }
 
 create_partitions() {
@@ -92,97 +97,102 @@ create_partitions() {
     # - FAT32 for the Boot & EFI partition
     # - ext4 for the root partition
     # - Label the partitions
-    case $SYSTEM_TYPE in
+    case ${SYSTEM_TYPE} in
         "UEFI")
-            mkfs.fat -F 32 ${PART_EFI} -n EFI
-            fatlabel ${PART_EFI} EFI
-            mkfs.fat -F 32 ${PART_BOOT} -n BOOT
-            e2label ${PART_BOOT} BOOT
+            mkfs.fat -F 32 "${PART_EFI}" -n EFI
+            fatlabel "${PART_EFI}" EFI
+            mkfs.fat -F 32 "${PART_BOOT}" -n BOOT
+            e2label "${PART_BOOT}" BOOT
             ;;
         "BIOS")
-            mkfs.ext2 ${PART_BIOS} -L BIOS
-            e2label ${PART_BIOS} BIOS
+            mkfs.ext2 "${PART_BOOT}" -L BIOS
+            e2label "${PART_BOOT}" BIOS
             ;;
     esac
 
-    mkfs.ext4 ${PART_ROOT} -L EXHERBO
-    e2label ${PART_ROOT} EXHERBO
+    mkfs.ext4 "${PART_ROOT}" -L EXHERBO
+    e2label "${PART_ROOT}" EXHERBO
 }
 
 mount_stage() {
     # Create the mountpoint and mount the root partition
     mkdir -p /mnt/exherbo/
-    mount ${PART_ROOT} /mnt/exherbo
+    mount "${PART_ROOT}" /mnt/exherbo
     cd /mnt/exherbo
 
     # Download and extract the stage3 tarball
-    curl -Os ${STAGE_URL}/${STAGE_FILE}
+    curl -Os "${STAGE_URL}/${STAGE_FILE}"
 
     # Download and verify the checksum
     # For now it leads to an error: the filename is not good in the checksum file
-    curl -Os ${STAGE_URL}/${STAGE_FILE}.sha256sum
-    diff -q ${STAGE_FILE}.sha256sum <(sha256sum ${STAGE_FILE}) > /dev/null && echo "The file and the sha256 sum match" || echo "The file and the sha256 sum do not match"
+    curl -Os "${STAGE_URL}/${STAGE_FILE}.sha256sum"
+    diff -q "${STAGE_FILE}.sha256sum" <(sha256sum ${STAGE_FILE}) > /dev/null && echo "The file and the sha256 sum match" || echo "The file and the sha256 sum do not match"
 
     # Extract the tarball and remove it
-    tar xJpf ${STAGE_FILE}
-    rm ${STAGE_FILE}*
+    tar xJpf "${STAGE_FILE}"
+    rm "${STAGE_FILE}*"
 }
 
 prepare_chroot() {
     # Define the partition to be mounted at boot
-    case $SYSTEM_TYPE in
+    case ${SYSTEM_TYPE} in
         "UEFI")
             cat <<EOF > /mnt/exherbo/etc/fstab
-            # <fs>          <mountpoint>    <type> <opts>   <dump/pass>
-            ${PART_ROOT}    /               ext4   defaults 0 0
-            ${PART_BOOT}    /boot           vfat   defaults 0 0
-            ${PART_EFI}     /efi            vfat   defaults 0 0
+# <fs>          <mountpoint>    <type> <opts>   <dump/pass>
+${PART_ROOT}    /               ext4   defaults 0 0
+${PART_BOOT}    /boot           vfat   defaults 0 0
+${PART_EFI}     /efi            vfat   defaults 0 0
 EOF
             ;;
         "BIOS")
             cat <<EOF > /mnt/exherbo/etc/fstab
-            # <fs>          <mountpoint>    <type> <opts>   <dump/pass>
-            ${PART_ROOT}    /               ext4   defaults 0 0
-            ${PART_BOOT}    /boot           ext2   defaults 0 0
+# <fs>          <mountpoint>    <type> <opts>   <dump/pass>
+${PART_ROOT}    /               ext4   defaults 0 0
+${PART_BOOT}    /boot           ext2   defaults 0 0
 EOF
             ;;
     esac
 
+    # Mount the system directories
     mount -o rbind /dev /mnt/exherbo/dev
     mount -o bind /sys /mnt/exherbo/sys
     mount -t proc none /mnt/exherbo/proc
 
+    # Mount the boot/efi partition
     mkdir -p /mnt/exherbo/boot
-    mount ${PART_BOOT} /mnt/exherbo/boot
+    mount "${PART_BOOT}" /mnt/exherbo/boot
 
-    if [ $SYSTEM_TYPE == "UEFI" ]; then
-        mount -o x-mount.mkdir ${PART_EFI} /mnt/exherbo/efi
+    if [ ${SYSTEM_TYPE} == "UEFI" ]; then
+        mount -o x-mount.mkdir "${PART_EFI}" /mnt/exherbo/efi
     fi
 }
 
 bios_or_uefi
+wipe_disk > /dev/null
+
+echo
+echo -e " - Disk wiped: \e[92m\u2713\e[0m"
+echo
 
 echo "Exherbo Linux will be installed on ${DISK}"
 echo
-echo "You need to create at least 2 partitions:" 
+echo "You need to create at least 2 partitions:"
 echo " - /     : Linux Filesystem"
 echo " - /boot : Linux Extended Boot"
 echo " - /efi  : EFI System (only for UEFI)"
 echo
-
-wipe_disk > /dev/null
-
-case $SYSTEM_TYPE in
+case ${SYSTEM_TYPE} in
 "UEFI")
+    echo "cfdsik will be launched to allow configuration of disk partitions..."
+    echo -n "IMPORTANT: SELECT 'Linux Extended Boot' TYPE FOR BOOT PARTITION AND WRITE!"
     echo
-    echo -n "cfdsik will be launched to allow partition creation..." 
     echo && read -n 1 -s -r -p "Press any key to continue..."
 
     echo "label: gpt"   | sfdisk -W always ${DISK} > /dev/null 2>&1
     echo ", 512M, U"    | sfdisk -W always -a ${DISK} > /dev/null 2>&1
     echo ", 512M, L"    | sfdisk -W always -a ${DISK} > /dev/null 2>&1
     echo ","            | sfdisk -W always -a ${DISK} > /dev/null 2>&1
-    cfdisk ${DISK} 
+    cfdisk ${DISK}
     ;;
 "BIOS")
     echo ", 512M, U"    | sfdisk -W always ${DISK} > /dev/null 2>&1
@@ -194,7 +204,7 @@ get_disk_partitions
 
 clear
 echo '
-    ███████╗██╗  ██╗██╗  ██╗███████╗██████╗ ██████╗  ██████╗ 
+    ███████╗██╗  ██╗██╗  ██╗███████╗██████╗ ██████╗  ██████╗
     ██╔════╝╚██╗██╔╝██║  ██║██╔════╝██╔══██╗██╔══██╗██╔═══██╗
     █████╗   ╚███╔╝ ███████║█████╗  ██████╔╝██████╔╝██║   ██║
     ██╔══╝   ██╔██╗ ██╔══██║██╔══╝  ██╔══██╗██╔══██╗██║   ██║
@@ -202,25 +212,25 @@ echo '
     ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═════╝  ╚═════╝
     '
 
-echo -n "Partitions creation..."
+echo -n "Partitions creation & formating..."
 create_partitions > /dev/null  2>&1
 echo -ne "\r\033[K"
-echo -e " - Disk wiped & new partition created: \e[92m\u2713\e[0m" 
+echo -e " - Disk wiped & new partition created: \e[92m\u2713\e[0m"
 
-echo -n "Download Exherbo Linux stage3 tarball and mount in '/'..."
+echo -n "Downloading Exherbo Linux stage3 tarball..."
 mount_stage > /dev/null 2>&1
 echo -ne "\r\033[K"
-echo -e " - Exherbo Linux downloaded & setup: \e[92m\u2713\e[0m" 
+echo -e " - Exherbo Linux downloaded & setup: \e[92m\u2713\e[0m"
 
-echo -n "Prepare chroot..."
+echo -n "Preparing chroot..."
 prepare_chroot > /dev/null 2>&1
 echo -ne "\r\033[K"
-echo -e " - Chroot prepared: \e[92m\u2713\e[0m" 
-echo 
+echo -e " - Chroot prepared: \e[92m\u2713\e[0m"
+echo
 
 # Let's chroot!
-cp ${SCRIPT_DIR}/chrooted.sh /mnt/exherbo
-env -i TERM=$TERM SHELL=/bin/bash HOME=$HOME $(which chroot) /mnt/exherbo /bin/bash chrooted.sh ${SYSTEM_TYPE} ${DISK}
+cp "${SCRIPT_DIR}"/chrooted.sh /mnt/exherbo
+env -i TERM="${TERM}" SHELL=/bin/bash HOME="${HOME}" "$(which chroot)" /mnt/exherbo /bin/bash chrooted.sh "${SYSTEM_TYPE}" "${DISK}"
 
 # It's the end my friend
 rm /mnt/exherbo/chrooted.sh
