@@ -3,44 +3,67 @@
 # Script to setup Exherbo once chrooted in the configured stage3 tarball
 
 CPU_CORES=$(nproc)
-DNS_SERVER_1="1.1.1.1"
-DNS_SERVER_2="9.9.9.9"
-GRUB_TIMEOUT=5
+GRUB_TIMEOUT=${GRUB_TIMEOUT:-5}
 KERNEL_BASE_URL="https://cdn.kernel.org/pub/linux/kernel/v"
 KERNEL_DEFAULT_VERSION="6.6.30"
 PALUDIS_CONF="/etc/paludis/options.conf"
 PALUDIS_WORLD="/var/db/paludis/repositories/installed/world"
 
+echo
+
+if [ -f "params" ]; then
+    source params
+    echo "The 'params' file has been found and loaded"
+else
+
+    echo "There is no 'params' file, default parameters will be used"
+
+fi
+
+echo
+
 SYSTEM_TYPE=$1
 DISK=$2
 
+GRUB_TIMEOUT=${GRUB_TIMEOUT:-5}
+
 # Configure the DNS resolvers
 {
-  echo "nameserver ${DNS_SERVER_1}"
-  echo "nameserver ${DNS_SERVER_2}"
+  echo "nameserver ${DNS_SERVER_1:-1.1.1.1}"
+  echo "nameserver ${DNS_SERVER_2:-9.9.9.9}"
 } > /etc/resolv.conf
 
 ask_config() {
-    read -rp $'Enter the Linux kernel version to use (default: '${KERNEL_DEFAULT_VERSION}'): ' KERNEL_VERSION_INPUT
-    KERNEL_VERSION="${KERNEL_VERSION_INPUT:-${KERNEL_DEFAULT_VERSION}}"
-    get_kernel_url
-
-    echo
-    if [ "${SYSTEM_TYPE}" == "UEFI" ]; then
-        read -rp $'Enter the boot loader to use (default: systemd-boot):\n(g) grub\n(s) systemd-boot\nWhat is your choice? ' bootloader_choice
-        case "${bootloader_choice}" in
-            g) LOADER="grub" ;;
-            *) LOADER="systemd-boot" ;;
-        esac
-    else
-        LOADER="grub"
+    if [ -z "${KERNEL_VERSION}" ]; then
+        read -rp $'Enter the Linux kernel version to use (default: '${KERNEL_DEFAULT_VERSION}'): ' KERNEL_VERSION_INPUT
+        KERNEL_VERSION="${KERNEL_VERSION_INPUT:-${KERNEL_DEFAULT_VERSION}}"
     fi
 
-    echo
-    read -rp $'Enter the hostname (default: exherbo): ' HOSTNAME_INPUT
-    HOSTNAME="${HOSTNAME_INPUT:-exherbo}"
+    get_kernel_url
 
-    read -rp 'Enter Country code (e.g.: fr-bepo, default: us): ' COUNTRY_CODE
+    if [ -z "${LOADER}" ]; then
+        echo
+        if [ "${SYSTEM_TYPE}" == "UEFI" ]; then
+            read -rp $'Enter the boot loader to use (default: systemd-boot):\n(g) grub\n(s) systemd-boot\nWhat is your choice? ' bootloader_choice
+            case "${bootloader_choice}" in
+                g) LOADER="grub" ;;
+                *) LOADER="systemd-boot" ;;
+            esac
+        else
+            LOADER="grub"
+        fi
+        echo
+    fi
+
+    if [ -z "${HOST_NAME}" ]; then
+        read -rp $'Enter the hostname (default: exherbo): ' HOST_NAME_INPUT
+        HOST_NAME="${HOST_NAME_INPUT:-exherbo}"
+    fi
+
+    if [ -z "${COUNTRY_CODE}" ]; then
+        read -rp 'Enter Country code (e.g.: fr-bepo, default: us): ' COUNTRY_CODE
+    fi
+
     case "${COUNTRY_CODE}" in
         "fr-bepo")
             KEYMAP="fr-bepo"
@@ -58,11 +81,15 @@ ask_config() {
             ;;
     esac
 
-    read -rp $'Enter timezone (e.g.: Europe/Paris, default: UTC): ' TIMEZONE_INPUT
-    TIMEZONE="${TIMEZONE_INPUT:-UTC}"
+    if [ -z "${TIMEZONE}" ]; then
+        read -rp $'Enter timezone (e.g.: Europe/Paris, default: UTC): ' TIMEZONE_INPUT
+        TIMEZONE="${TIMEZONE_INPUT:-UTC}"
+    fi
 
-    read -rp $'Enter the username (default: davlgd): ' USER_INPUT
-    USER="${USER_INPUT:-davlgd}"
+    if [ -z "${USER_NAME}" ]; then
+        read -rp $'Enter the username (default: exherbo): ' USER_INPUT
+        USER_NAME="${USER_INPUT:-exherbo}"
+    fi
 }
 
 configure_os() {
@@ -80,17 +107,28 @@ configure_os() {
     PS1="(Exherbo) $PS1"
 
     # Set the hostname
-    echo "${HOSTNAME}" > /etc/hostname
-    echo "127.0.0.1 ${HOSTNAME}.local ${HOSTNAME} localhost" > /etc/hosts
-    echo "::1 ${HOSTNAME}.local ${HOSTNAME} localhost" >> /etc/hosts
+    echo "${HOST_NAME}" > /etc/hostname
+    echo "127.0.0.1 ${HOST_NAME}.local ${HOST_NAME} localhost" > /etc/hosts
+    echo "::1 ${HOST_NAME}.local ${HOST_NAME} localhost" >> /etc/hosts
 
-    # Defines a new sudo user and set its password
-    useradd -m -G adm,audio,cdrom,disk,usb,users,video,wheel -s /bin/bash "${USER}"
-    echo "${USER} ALL=(ALL) ALL" > /etc/sudoers.d/"${USER}"
-    chmod 440 /etc/sudoers.d/"${USER}"
-    echo
-    echo "Account created for ${USER}, define its password:"
-    passwd "${USER}"
+    # Defines the new user with sudo rights
+    useradd -m -G adm,audio,cdrom,disk,usb,users,video,wheel -s /bin/bash "${USER_NAME}" > /dev/null 2>&1
+    echo "${USER_NAME} ALL=(ALL) ALL" > /etc/sudoers.d/"${USER_NAME}"
+    chmod 440 /etc/sudoers.d/"${USER_NAME}"
+
+
+    if [ "${PASSWORD_ASK}" != "false" ]; then
+        echo
+        echo "Account created for ${USER_NAME}, define its password:"
+        passwd "${USER_NAME}"
+    # In non-interactive mode, the default password is 'exherbo'
+    # User should change it at first login
+    else
+        echo
+        echo "Account created for ${USER_NAME}, password should be set at first login"
+        echo "${USER_NAME}:exherbo" | sudo chpasswd > /dev/null 2>&1
+        chage -d 0 "${USER_NAME}"
+    fi
 
     # Set the login message
     echo '
@@ -113,15 +151,14 @@ configure_packages_manager() {
     cave sync
 
     # Add some repositories
-    cave resolve -x \
-        repository/hardware \
-        repository/marv \
-        repository/tombriden
+    for repository in "${REPOSITORIES[@]}"; do
+        cave resolve -x repository/"${repository}"
+    done
 
     # Set packages to install
-    echo 'app-editors/nano
-app-misc/fastfetch
-firmware/linux-firmware' >> ${PALUDIS_WORLD}
+    for package in "${PACKAGES[@]}"; do
+        echo "${package}" >> "${PALUDIS_WORLD}"
+    done
 
     # Add options and packages depending on system and bootloader
     if [ "${LOADER}" == "systemd-boot" ]; then
@@ -132,6 +169,7 @@ sys-apps/coreutils xattr' >> ${PALUDIS_CONF}
         echo 'sys-boot/dracut' >> ${PALUDIS_WORLD}
     fi
 
+    # With UEFI system, efivars must be mounted, and some packages installed
     if [ "${SYSTEM_TYPE}" == "UEFI" ]; then
         mount -t efivarfs efivarfs /sys/firmware/efi/efivars
         echo "sys-boot/efibootmgr" >> ${PALUDIS_WORLD}
@@ -143,11 +181,11 @@ sys-apps/coreutils xattr' >> ${PALUDIS_CONF}
 }
 
 update_system() {
-    # Update the system and install desired packages
+    # Update the system and install packages in world set
     cave sync
     cave resolve world -zx --skip-phase test
 
-    # Install bootloader package with EFI support (activated through options)
+    # Install bootloader package to get UEFI support (activated through options)
     if [ "${SYSTEM_TYPE}" == "UEFI" ]; then
         if  [ "${LOADER}" == "systemd-boot" ]; then
             cave resolve sys-apps/systemd -zx1 --skip-phase test
@@ -179,8 +217,11 @@ get_kernel_url() {
 }
 
 get_kernel() {
-    cd /usr/src && mkdir linux && cd linux
+    mkdir -p /usr/src/linux
+    cd /usr/src/linux
     curl -O "${KERNEL_URL}"
+
+    # Extract the tarball keeping the directory structure, then clean up
     tar xJvf "linux-${KERNEL_VERSION}.tar.xz"
     rm "linux-${KERNEL_VERSION}.tar.xz"
     cd "linux-${KERNEL_VERSION}"
@@ -190,6 +231,7 @@ compile_kernel() {
 
     make defconfig
 
+    # Enable some kernel options to get a working console wuthout too many logs
     scripts/config -e CONFIG_BOOT_VESA_SUPPORT
     scripts/config --set-val CONFIG_CONSOLE_LOGLEVEL_DEFAULT 3
     scripts/config -e CONFIG_DRM_FBDEV_EMULATION
@@ -204,6 +246,7 @@ compile_kernel() {
     scripts/config -d CONFIG_LOGO
     scripts/config -d CONFIG_FONTS
 
+    # With UEFI systems, more kernel options are needed
     if [ "${SYSTEM_TYPE}" == "UEFI" ]; then
         scripts/config -e CONFIG_EFI
         scripts/config -e CONFIG_EFI_STUB
@@ -212,12 +255,18 @@ compile_kernel() {
     fi
 
     echo
-    read -rp $'Do you want to customize the kernel configuration? [y/n] '
-    if [[ "${REPLY}" =~ ^[Yy]$ ]]; then
-        make menuconfig
+
+    # Compile the kernel, with or without interaction depending on params
+    if [ "${KERNEL_INTERACTIVE}" == "false" ]; then
+        yes "n" | make -j$(nproc)
+    else
+        read -rp $'Do you want to customize the kernel configuration? [y/n] '
+        if [[ "${REPLY}" =~ ^[Yy]$ ]]; then
+            make menuconfig
+        fi
+        make -j$(nproc)
     fi
 
-    make -j$(nproc)
     make modules_install
     make install
 }
@@ -272,11 +321,11 @@ compile_kernel
 echo
 echo -e " - Configure Paludis and compile some tools: \e[92m\u2713\e[0m"
 echo -e " - Kernel ${KERNEL_VERSION} download and compilation: \e[92m\u2713\e[0m"
-echo -n "Compiling and setting up bootloader..."
+echo -n "Setting up ${LOADER}..."
 setup_bootloader > /dev/null 2>&1
 
 echo -ne "\r\033[K"
-echo -e " - Compilation and setup of ${LOADER}: \e[92m\u2713\e[0m"
+echo -e " - Setup of ${LOADER}: \e[92m\u2713\e[0m"
 
 echo
 echo -n "Enabling services:"
