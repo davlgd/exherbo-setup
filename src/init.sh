@@ -6,24 +6,40 @@ STAGE_URL="https://stages.exherbolinux.org/x86_64-pc-linux-gnu"
 STAGE_FILE="exherbo-x86_64-pc-linux-gnu-gcc-current.tar.xz"
 SCRIPT_DIR=$PWD
 
+echo
+
+if [ -f "params" ]; then
+    source params
+    echo "The 'params' file has been found and loaded"
+else
+
+    echo "There is no 'params' file, default parameters will be used"
+
+fi
+
+echo
 # Set the target device, show usage if more than one argument or --help is given
-DISK="/dev/sda"
+if [ -z "${DISK}" ]; then
+    DISK="/dev/sda"
+fi
 
 if [ $# -gt 1 ] || [[ $1 == "--help" ]]; then
 echo "Exherbo Setup - Exherbo Linux Installation Script"
 echo "Usage:"
-echo "  ./init.sh <device>    - Installs Exherbo Linux on the specified device."
-echo "  ./init.sh             - Installs Exherbo Linux on /dev/sda by default."
+echo "  ./init.sh <device>    - Installs Exherbo Linux on the specified device"
+echo "  ./init.sh             - Installs Exherbo Linux on /dev/sda by default"
 echo ""
 echo "Options:"
-echo "  <device>    - The target device for Exherbo Linux installation."
+echo "  <device>    - The target device for Exherbo Linux installation"
 echo "                Example: ./init.sh /dev/nvme0n1"
 echo ""
 echo "Description:"
 echo "  Exherbo Setup is a simple script to automate the installation of Exherbo Linux."
 echo "  It can be run with a specific target device or without any arguments,"
 echo "  in which case it will use /dev/sda as the default installation target."
-echo "  The script will automaticaly detect if you're using a BIOS or EFI based system"
+echo "  The script will automaticaly detect if you're using a BIOS or EFI based system."
+echo ""
+echo "  You can set some parameters through the 'params' file."
 echo ""
 echo "  WARNING: This script will format the target device and install Exherbo Linux."
 echo "           Make sure to back up any important data on the device before proceeding."
@@ -167,6 +183,7 @@ EOF
     fi
 }
 
+clear
 bios_or_uefi
 wipe_disk > /dev/null
 
@@ -230,10 +247,14 @@ echo
 
 # Let's chroot!
 cp "${SCRIPT_DIR}"/chrooted.sh /mnt/exherbo
+if [ -f "${SCRIPT_DIR}"/params ]; then
+    cp "${SCRIPT_DIR}"/params /mnt/exherbo
+fi
 env -i TERM="${TERM}" SHELL=/bin/bash HOME="${HOME}" "$(which chroot)" /mnt/exherbo /bin/bash chrooted.sh "${SYSTEM_TYPE}" "${DISK}"
 
 # It's the end my friend
 rm /mnt/exherbo/chrooted.sh
+rm -f /mnt/exherbo/params
 cd / && umount -R /mnt/exherbo
 umount -l /mnt/exherbo
 reboot

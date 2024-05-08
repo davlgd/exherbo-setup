@@ -1,0 +1,20 @@
+COUNTRY_CODE="fr"
+DISK="/dev/sda"
+DNS_SERVER_1="1.1.1.1"
+DNS_SERVER_2="9.9.9.9"
+GRUB_TIMEOUT="5"
+HOST_NAME="exherbo"
+KERNEL_INTERACTIVE="false"
+KERNEL_VERSION="6.8.9"
+LOADER="systemd-boot"
+TIMEZONE="Europe/Paris"
+USER_NAME="davlgd"
+PASSWORD_ASK="false"
+REPOSITORIES=( hardware
+    marv
+    tombriden
+)
+PACKAGES=( app-editors/nano
+    app-misc/fastfetch
+    firmware/linux-firmware
+)
