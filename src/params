@@ -10,11 +10,12 @@ LOADER="systemd-boot"
 TIMEZONE="Europe/Paris"
 USER_NAME="davlgd"
 PASSWORD_ASK="false"
-REPOSITORIES=( hardware
-    marv
-    tombriden
-)
 PACKAGES=( app-editors/nano
     app-misc/fastfetch
     firmware/linux-firmware
 )
+REPOSITORIES=( hardware
+    marv
+    tombriden
+)
+SWAP_SIZE=""

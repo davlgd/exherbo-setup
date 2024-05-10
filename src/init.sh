@@ -68,13 +68,69 @@ bios_or_uefi() {
 
 wipe_disk() {
     read -rp $"You're about to wipe ${DISK}. Do you want to continue? [y/n] "
-    if [[ ! "${REPLY}" =~ ^[Yy]$ ]]
-    then
+    if [[ ! "${REPLY}" =~ ^[Yy]$ ]]; then
         echo
         exit 1
     fi
 
     wipefs -a "${DISK}"
+}
+
+ask_swap() {
+    if [ -z "${SWAP_SIZE}" ]; then
+        read -rp $"Do you want to create a swap partition? [y/n] "
+        if [[ "${REPLY}" =~ ^[Yy]$ ]]; then
+            echo -n "Enter the size of the swap partition (in GB): "
+            read -r SWAP_SIZE
+        fi
+    fi
+
+    if [ -n "${SWAP_SIZE}" ]; then
+        if ! [[ "${SWAP_SIZE}" =~ ^[0-9]+$ ]] || [ "${SWAP_SIZE}" -lt 1 ] || [ "${SWAP_SIZE}" -gt 32 ]
+        then
+            echo "Invalid swap size: ${SWAP_SIZE}"
+            exit 1
+        fi
+    fi
+}
+
+format_disk() {
+    echo
+    echo -e " - Disk wiped: \e[92m\u2713\e[0m"
+    echo
+
+    echo "Exherbo Linux will be installed on ${DISK}"
+    echo
+    echo "You need to create at least 2 partitions:"
+    echo " - /     : Linux Filesystem"
+    echo " - /boot : Linux Extended Boot"
+    echo " - /efi  : EFI System (only for UEFI)"
+    echo
+    case ${SYSTEM_TYPE} in
+    "UEFI")
+        echo "cfdsik will be launched to allow configuration of disk partitions..."
+        echo -n "IMPORTANT: SELECT 'Linux Extended Boot' TYPE FOR BOOT PARTITION AND WRITE!"
+        echo
+        echo && read -n 1 -s -r -p "Press any key to continue..."
+
+        echo "label: gpt"   | sfdisk -W always ${DISK} > /dev/null 2>&1
+        echo ", 512M, U"    | sfdisk -W always -a ${DISK} > /dev/null 2>&1
+        echo ", 512M, L"    | sfdisk -W always -a ${DISK} > /dev/null 2>&1
+        if [ "${SWAP_SIZE}" ]; then
+            echo ", ${SWAP_SIZE}G, L" | sfdisk -W always -a ${DISK} > /dev/null 2>&1
+        fi
+        echo ","            | sfdisk -W always -a ${DISK} > /dev/null 2>&1
+        cfdisk ${DISK}
+        ;;
+    "BIOS")
+        echo ", 512M, U"    | sfdisk -W always ${DISK} > /dev/null 2>&1
+        if [ "${SWAP_SIZE}" ]; then
+            echo ", ${SWAP_SIZE}G, L" | sfdisk -W always -a ${DISK} > /dev/null 2>&1
+        fi
+        echo ","            | sfdisk -W always -a ${DISK} > /dev/null 2>&1
+        ;;
+    esac
+
 }
 
 get_disk_partitions() {
@@ -83,11 +139,21 @@ get_disk_partitions() {
         if [[ "${DISK}" == /dev/sd* ]]; then
             PART_EFI="${DISK}1"
             PART_BOOT="${DISK}2"
-            PART_ROOT="${DISK}3"
+            if [ "${SWAP_SIZE}" ]; then
+                PART_SWAP="${DISK}3"
+                PART_ROOT="${DISK}4"
+            else
+                PART_ROOT="${DISK}3"
+            fi
         elif [[ "${DISK}" == /dev/nvme* ]]; then
             PART_EFI="${DISK}p1"
             PART_BOOT="${DISK}p2"
-            PART_ROOT="${DISK}p3"
+            if [ "${SWAP_SIZE}" ]; then
+                PART_SWAP="${DISK}p3"
+                PART_ROOT="${DISK}p4"
+            else
+                PART_ROOT="${DISK}p3"
+            fi
         else
             echo "Storage device not recognized"
             exit 1
@@ -96,10 +162,20 @@ get_disk_partitions() {
     "BIOS")
         if [[ "${DISK}" == /dev/sd* ]]; then
             PART_BOOT="${DISK}1"
-            PART_ROOT="${DISK}2"
+            if [ "${SWAP_SIZE}" ]; then
+                PART_SWAP="${DISK}2"
+                PART_ROOT="${DISK}3"
+            else
+                PART_ROOT="${DISK}2"
+            fi
         elif [[ "${DISK}" == /dev/nvme* ]]; then
             PART_BOOT="${DISK}p1"
-            PART_ROOT="${DISK}p2"
+            if [ "${SWAP_SIZE}" ]; then
+                PART_SWAP="${DISK}p2"
+                PART_ROOT="${DISK}p3"
+            else
+                PART_ROOT="${DISK}p2"
+            fi
         else
             echo "Storage device not recognized"
             exit 1
@@ -128,6 +204,10 @@ create_partitions() {
 
     mkfs.ext4 "${PART_ROOT}" -L EXHERBO
     e2label "${PART_ROOT}" EXHERBO
+
+    if [ "${SWAP_SIZE}" ]; then
+        mkswap "${PART_SWAP}" -L SWAP
+    fi
 }
 
 mount_stage() {
@@ -169,6 +249,10 @@ EOF
             ;;
     esac
 
+    if [ "${SWAP_SIZE}" ]; then
+        echo "${PART_SWAP}    none            swap    sw              0 0" >> /mnt/exherbo/etc/fstab
+    fi
+
     # Mount the system directories
     mount -o rbind /dev /mnt/exherbo/dev
     mount -o bind /sys /mnt/exherbo/sys
@@ -185,38 +269,9 @@ EOF
 
 clear
 bios_or_uefi
+ask_swap
 wipe_disk > /dev/null
-
-echo
-echo -e " - Disk wiped: \e[92m\u2713\e[0m"
-echo
-
-echo "Exherbo Linux will be installed on ${DISK}"
-echo
-echo "You need to create at least 2 partitions:"
-echo " - /     : Linux Filesystem"
-echo " - /boot : Linux Extended Boot"
-echo " - /efi  : EFI System (only for UEFI)"
-echo
-case ${SYSTEM_TYPE} in
-"UEFI")
-    echo "cfdsik will be launched to allow configuration of disk partitions..."
-    echo -n "IMPORTANT: SELECT 'Linux Extended Boot' TYPE FOR BOOT PARTITION AND WRITE!"
-    echo
-    echo && read -n 1 -s -r -p "Press any key to continue..."
-
-    echo "label: gpt"   | sfdisk -W always ${DISK} > /dev/null 2>&1
-    echo ", 512M, U"    | sfdisk -W always -a ${DISK} > /dev/null 2>&1
-    echo ", 512M, L"    | sfdisk -W always -a ${DISK} > /dev/null 2>&1
-    echo ","            | sfdisk -W always -a ${DISK} > /dev/null 2>&1
-    cfdisk ${DISK}
-    ;;
-"BIOS")
-    echo ", 512M, U"    | sfdisk -W always ${DISK} > /dev/null 2>&1
-    echo ","            | sfdisk -W always -a ${DISK} > /dev/null 2>&1
-    ;;
-esac
-
+format_disk
 get_disk_partitions
 
 clear
